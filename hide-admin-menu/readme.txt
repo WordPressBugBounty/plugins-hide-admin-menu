@@ -3,7 +3,7 @@ Contributors: bhavinthummar
 Donate link: https://www.paypal.me/BThummar
 Tags:  menu hide, admin menu hide, admin menu show, admin menu plugin, user role
 Requires at least: 4.6
-Tested up to: 6.5.4
+Tested up to: 6.8.1
 Stable tag: 1.1.2
 License: GPLv2 or later
 License URI: 
