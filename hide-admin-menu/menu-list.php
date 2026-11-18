@@ -1,507 +1,329 @@
 <?php
-
-//add css
-add_action( 'admin_enqueue_scripts', 'bhm_load_admin_style' );  
-
-function bhm_load_admin_style() {
-  ob_start();
-  wp_enqueue_style( 'admin_css', plugin_dir_url( __FILE__ ) . 'css/style-admin.css', false, '1.0.2' );
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
 }
 
-function app_output_buffer() {
-} // soi_output_buffer
+/* ---------- Assets ---------- */
 
-//to solve the issue in health check
-//add_action('init', 'app_output_buffer');
+function bhm_enqueue_assets( $hook ) {
+	if ( false === strpos( (string) $hook, 'hide-admin-menu' ) ) {
+		return;
+	}
+	wp_enqueue_style( 'bhm-admin', plugin_dir_url( __FILE__ ) . 'css/style-admin.css', array(), BHM_VERSION );
+}
+add_action( 'admin_enqueue_scripts', 'bhm_enqueue_assets' );
 
-function bhm_get_menu_list(){
+/* ---------- Form handling (runs before any output, so redirects work) ---------- */
 
-  ob_start(null, 0, 0);
+function bhm_handle_form() {
+	if ( ! isset( $_POST['bhm_action'] ) ) {
+		return;
+	}
+	if ( ! isset( $_GET['page'] ) || 'hide-admin-menu' !== sanitize_key( wp_unslash( $_GET['page'] ) ) ) {
+		return;
+	}
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+	check_admin_referer( 'bhm_save_menus' );
 
+	$action      = sanitize_key( wp_unslash( $_POST['bhm_action'] ) );
+	$valid_roles = array_keys( wp_roles()->roles );
 
-  global $wp_session;
-  //get all roles of user
-  global $wp_roles;
-  
-  $roles = $wp_roles->roles;
+	if ( 'default' === $action ) {
+		update_option( 'hide_menu_bh_plugin', '' );
+		update_option( 'hide_sub_menu_bh_plugin', '' );
+		update_option( 'hide_top_menu_bh_plugin', '' );
+		$message = 'default';
+	} elseif ( 'save' === $action ) {
+		$side = isset( $_POST['menu_list'] ) ? bhm_clean_list( wp_unslash( $_POST['menu_list'] ), $valid_roles ) : array();
+		$sub  = isset( $_POST['sub_menu_list'] ) ? bhm_clean_list( wp_unslash( $_POST['sub_menu_list'] ), $valid_roles ) : array();
+		$top  = isset( $_POST['top_menu_list'] ) ? bhm_clean_list( wp_unslash( $_POST['top_menu_list'] ), $valid_roles ) : array();
 
-  if (isset($_POST['save'])) {
- 
-    //check administrator access required
-    if(current_user_can('administrator'))
-    {
-          //check wpnonce
-      if(check_admin_referer('menu-remove')){
-        
-        //here we have to check this is array or not. (array check validation)
-        $menu_list = isset( $_POST['menu_list'] ) ? (array) $_POST['menu_list'] : array();
-        $sub_menu_list = isset( $_POST['sub_menu_list'] ) ? (array) $_POST['sub_menu_list'] : array();
+		update_option( 'hide_menu_bh_plugin', wp_json_encode( $side ) );
+		update_option( 'hide_sub_menu_bh_plugin', wp_json_encode( $sub ) );
+		update_option( 'hide_top_menu_bh_plugin', wp_json_encode( $top ) );
+		$message = 'save';
+	} else {
+		return;
+	}
 
-        $new_menu_list = array(); //define array for side menu array
-        $new_sub_menu_list = array(); //define array for side sub menu array
-        foreach ($menu_list as $list_data_key => $list_data_role) {
+	wp_safe_redirect( add_query_arg( array( 'page' => 'hide-admin-menu', 'message' => $message ), admin_url( 'admin.php' ) ) );
+	exit;
+}
+add_action( 'admin_init', 'bhm_handle_form' );
 
-            // data sanitization functions used for valid text (text validation)
-            $list_data_role = array_map( 'sanitize_text_field', $list_data_role );
-            foreach ($list_data_role as $list_data) {
-              if (is_numeric($list_data)) { //validate the data
-                 //we check input will be only number then after we process further. 
-                 $new_menu_list[$list_data_key][] = $wp_session['all_side_menus'][$list_data][2];
-              }
-            }
-        }
-
-        foreach ($sub_menu_list as $sub_list_data_key => $sub_list_data_role) {
-          
-          $sub_list_data_role = array_map( 'sanitize_text_field', $sub_list_data_role );
-          foreach ($sub_list_data_role as $sub_list_data) {
-              //we get parent and child key 
-              $key_data = explode('_',$sub_list_data);
-              $parent_key = $key_data[0];
-              $child_key = $key_data[1];
-              //we find parent of child
-              $parent_value = $wp_session['all_side_menus'][$parent_key][2];
-
-              //we check input will be only number then after we process further. 
-              $new_sub_menu_list[$sub_list_data_key][] = $parent_value.'__con__'.$wp_session['all_side_sub_menus'][$parent_value][$child_key][2];
-          }                              
-          
-        }
-
-        $remove_side_array = $new_menu_list;
-        $json_remove_side_array = json_encode($remove_side_array); //json array.
-
-        $remove_sub_side_array = $new_sub_menu_list;
-        $json_remove_sub_side_array = json_encode($remove_sub_side_array); //json array.
-        
-        //remove menus form the admin top menu.
-        //here we have to check this is array or not.(array check validation)
-        $top_menu_list = isset( $_POST['top_menu_list'] ) ? (array) $_POST['top_menu_list'] : array();
-        
-        $new_menu_list = array(); //array define for top menu        
-
-        foreach ($top_menu_list as $list_data_key => $list_data_role) {
-            // data sanitization functions used for valid text (text validation)
-            $list_data_role = array_map( 'sanitize_text_field', $list_data_role );
-            foreach ($list_data_role as $list_data) {
-               //we check input will be only number then after we process further. 
-               $new_menu_list[$list_data_key][] = $wp_session['all_top_menus'][$list_data]->id;
-            }
-        }
-
-        //echo '<pre>';print_r($new_menu_list);exit; 
-        $remove_top_array = $new_menu_list;
-        $json_remove_top_array = json_encode($remove_top_array); //json array.
-        
-        //update the values
-        update_option('hide_menu_bh_plugin',$json_remove_side_array);
-        update_option('hide_sub_menu_bh_plugin',$json_remove_sub_side_array);
-        update_option('hide_top_menu_bh_plugin',$json_remove_top_array);
-        wp_redirect('?page='.$_GET['page'].'&message=save');    
-
-      }//end of wpnonce   
-    }//end of administrator check 
-    
-   } //complete post
-
-   if(isset($_POST['default'])){
-      update_option('hide_menu_bh_plugin', '');
-      update_option('hide_sub_menu_bh_plugin', '');
-      update_option('hide_top_menu_bh_plugin', '');
-      wp_redirect('?page='.$_GET['page'].'&message=default');    
-   }
-?>
-<div class="wrap">
-<h2>Hide Menus</h2>
-<div class="tablenav top">
-
-<br class="clear">
-</div>
-<?php
-//set message after form submit
-if(isset($_GET['message'])){
-
-  $msg = '';
-
-  if($_GET['message'] == 'save'){
-    $msg =  '<div id="message" class="updated notice notice-success is-dismissible"><p>Your changes has been updated.</div>';
-  }
-
-  if($_GET['message'] == 'default'){
-    $msg =  '<div id="message" class="updated notice notice-success is-dismissible"><p>Your default setting has been setup.</div>';
-  }
-
-  echo $msg;
+/**
+ * Clean posted checkbox data: only known roles, only non-empty string values.
+ */
+function bhm_clean_list( $raw, $valid_roles ) {
+	$clean = array();
+	if ( ! is_array( $raw ) ) {
+		return $clean;
+	}
+	foreach ( $raw as $role => $items ) {
+		$role = sanitize_key( $role );
+		if ( ! in_array( $role, $valid_roles, true ) || ! is_array( $items ) ) {
+			continue;
+		}
+		foreach ( $items as $item ) {
+			if ( ! is_string( $item ) ) {
+				continue;
+			}
+			$item = sanitize_text_field( $item );
+			if ( '' !== $item ) {
+				$clean[ $role ][] = $item;
+			}
+		}
+	}
+	return $clean;
 }
 
-//now we have to fetch all hide_menu_array from the db for side bar
-$get_data = get_option('hide_menu_bh_plugin');
-if($get_data!='null' && $get_data!='' ){
-   $fetch_hide_menu_array = json_decode($get_data);
-}
-else{
-   $fetch_hide_menu_array = array();
-}
+/* ---------- Render helpers ---------- */
 
-//now we have to fetch all hide_sub_menu_array from the db for side bar
-$get_data = get_option('hide_sub_menu_bh_plugin');
-if($get_data!='null' && $get_data!='' ){
-   
-   $get_data2 = json_decode($get_data);
-
-   foreach ($get_data2 as $role_key => $get_data2_role) {     
-     //now we remove the paren key
-     foreach ($get_data2_role as $gets_data) {
-       $new_get_data = explode('__con__', $gets_data);
-       $fetch_hide_sub_menu_array[$role_key][] = $new_get_data['1']; 
-     }
-   }   
-
-}
-else{
-   $fetch_hide_sub_menu_array = array();
+function bhm_is_checked( $data, $role, $value ) {
+	if ( empty( $data[ $role ] ) || ! is_array( $data[ $role ] ) ) {
+		return false;
+	}
+	return in_array( (string) $value, array_map( 'strval', $data[ $role ] ), true );
 }
 
-//now we have to fetch all hide_menu_array from the db for top bar
-$get_data = get_option('hide_top_menu_bh_plugin');
-if($get_data!='null' && $get_data!='' ){
- $fetch_hide_top_menu_array = json_decode($get_data);
-}
-else{
-  $fetch_hide_top_menu_array = array();
+function bhm_checkbox_cell( $field, $role_key, $value, $checked, $label ) {
+	echo '<td class="bhm-check"><input type="checkbox" name="' . esc_attr( $field . '[' . $role_key . '][]' ) . '" value="' . esc_attr( $value ) . '"' . checked( $checked, true, false ) . ' aria-label="' . esc_attr( $label ) . '" /></td>';
 }
 
-?>
-
-<form method="post" >
-
-<?php
-  //create wpnonce
-  wp_nonce_field( 'menu-remove' );
-?>
-<div class="container">  
-
-  <div class="col-md-6">
-    <input name="default" type="submit" class="button button-info button-large" value="Set Default Setting" >
-    <br/><br/>
-    <i>Hide menu according the role of user. Notes: This plugin will not able to show those menu which are not access by sub role of user according WordPress or other plugin. But it can hide those which was shown by default.</i>    
-  </div>
-
-  <div class="col-md-6" align="right">
-   <input name="page" type="hidden" value="social-option-2">
-   <input name="save" type="submit" class="button button-primary button-large" id="publish" value="Update">
-  </div>
-</div>
-
-<br/>
-
-<div class="col-md-6">
-  <table class='wp-list-table widefat fixed striped posts table-second-td'>
- <tr>
- <th><b>Menu of Side Bar<b/></th>
-
- <?php
- foreach ($roles as $role) {
-   ?>
-    <th ><b><?php echo $role['name'] ?><b/></th>
-   <?php
- }
- ?> 
- </tr>
-  <?php
-
-   $all_menu = $wp_session['all_side_menus'];
-   $all_sub_menu = $wp_session['all_side_sub_menus'];
-   
-  foreach ($all_menu as $key=>$row) { 
-   if(isset($row['6']) && $row['6']!=''){
-   
-    $sub_menu_array = isset($all_sub_menu[$row['2']]) ? $all_sub_menu[$row['2']] : array() ;
-    //check it is array or not
-    $sub_menu_array = isset( $sub_menu_array ) ? (array) $sub_menu_array : array();
-   ?>
-    <tr class='my_text'>
-     <td class="primary_menu_seprator"><span class="dashicons-before  <?php echo esc_attr($row['6']); ?>"></span> 
-      <span><?php echo  esc_attr(strip_tags($row['0'])); ?></span></td>
-     <?php foreach ($roles as $role_key=>$role) {  ?>
-     <td class="primary_menu_seprator">
-     <input
-      <?php if(in_array($row['2'], isset($fetch_hide_menu_array->$role_key) ? $fetch_hide_menu_array->$role_key : array() )) echo 'checked'; ?>
-      type="checkbox" name="menu_list[<?php echo $role_key ?>][]" value="<?php echo esc_attr($key); ?>">
-     </td>  
-   <?php } ?>
-    </tr>
-
-    <?php
-       //now we add the sub menu to parent menu
-
-        foreach ($sub_menu_array as $keys=>$rows) {
-
-          $fetch_hide_sub_menu_array = isset($fetch_hide_sub_menu_array) ?  $fetch_hide_sub_menu_array : array();
-          ?>
-          
-          <tr class='my_text sub-menu'>
-
-             <td ><span>-- </span> 
-              <span><?php echo  esc_attr(strip_tags($rows['0'])); ?></span></td>
-            <?php foreach ($roles as $role_key=>$role) { ?> 
-             <td>
-             <input <?php if(in_array($rows['2'], isset($fetch_hide_sub_menu_array[$role_key]) ? $fetch_hide_sub_menu_array[$role_key] : array() )) echo 'checked'; ?>
-              type="checkbox" name="sub_menu_list[<?php echo $role_key ?>][]" value="<?php echo $key; ?>_<?php echo esc_attr($keys); ?>">
-             </td>  
-            <?php } ?>
-
-          </tr>
-
-        <?php
-        }//end foreach
-    }//if
-   }  //for 
-?>
-</table>
-</div>
-
-<br/>
-<div class="col-md-6">
-   <table class='wp-list-table widefat fixed striped posts table-second-td'>
- <tr>
- <th><b>Menu of Top Bar<b/></th>
- <?php
- foreach ($roles as $role) {
-   ?>
-    <th ><b><?php echo $role['name'] ?><b/></th>
-   <?php
- }
- ?> 
- </tr>
- </tr>
-  <?php
-   
-   $all_menu = $wp_session['all_top_menus'];
-   $all_parent_menu = array();
-   $all_child_menu = array();
-   foreach ($all_menu as $key => $value) {
-     if($value->title != '' && $key != 'menu-toggle'){
-       if($value->parent!='' && $value->parent!='top-secondary'){
-          $all_child_menu[$key] = $value;
-       }
-       else{
-          if($value->parent != 'wp-logo-external'){
-            $all_parent_menu[$key] = $value;
-          }
-       }
-
-     }
-   }
-   foreach ($all_child_menu as $key => $value) {
-     if(isset($all_parent_menu[$value->parent])){
-        $all_parent_menu[$value->parent]->child_menu[] = $value;
-     }else{
-        if($value->parent == 'wp-logo-external'){
-          $all_parent_menu['wp-logo']->child_menu[] = $value;
-        }
-        else if($value->parent == 'user-actions'){
-          $value->parent = 'my-account';
-          $all_parent_menu['my-account']->child_menu[] = $value;   
-        }
-        else{
-          $all_parent_menu[$value->parent] = $value;   
-        }
-     }
-   }
-
-  foreach ($all_parent_menu as $row) { 
-
-   if($row->title!=''){
-   ?>
-    <tr class='my_text'>
-
-     <td >
-      <span id="wp-admin-bar-<?php echo esc_attr($row->id); ?>">
-        <span class="ab-item">
-          <span class="ab-icon"></span>
-        </span> 
-      </span> 
-      <span># <?php echo  esc_attr(strip_tags($row->title)); ?></span></td>
-     <?php foreach ($roles as $role_key=>$role) { ?>  
-     <td>
-     <input
-      <?php if(in_array($row->id, isset($fetch_hide_top_menu_array->$role_key) ? $fetch_hide_top_menu_array->$role_key : array() )) echo 'checked'; ?>
-      type="checkbox" name="top_menu_list[<?php echo $role_key ?>][]" value="<?php echo esc_attr($row->id); ?>">
-     </td>  
-     <?php } ?>
-    </tr>
-
-    <?php
-      if(isset($row->child_menu)){
-          foreach ($row->child_menu as $child_menu) {
-            if($child_menu->title!=''){
-              ?>
-                <td ><span id="wp-admin-bar-<?php echo esc_attr($child_menu->id); ?>"></span> 
-                  <span>-- <?php echo  esc_attr(strip_tags($child_menu->title)); ?></span></td>
-
-                 <?php foreach ($roles as $role_key=>$role) { ?> 
-                 <td>
-                 <input
-                  <?php if(in_array($child_menu->id, isset($fetch_hide_top_menu_array->role_key) ? $fetch_hide_top_menu_array->role_key : array() )) echo 'checked'; ?>
-                  type="checkbox" name="top_menu_list[<?php echo $role_key ?>][]" value="<?php echo esc_attr($child_menu->id); ?>">
-                 </td>
-                 <?php } ?>  
-                </tr>
-              <?php   
-            }//else
-          }//foreach
-      } //is (child menu isset)
-    }//if
-   }  //for
-?>
-</table>
-</div>
-
-<br/>
-
-<div class="">
-   <input name="page" type="hidden" value="social-option-2">
-   <input name="save" type="submit" class="button button-primary button-large" id="publish" value="Update">
-</div>
-
-</form>
-</div>
-
-<div class="clear"></div>
-<!-- donate form -->
-<div class="wrap">
-  <div id="poststuff">
-    <div id="post-body" class="metabox-holder columns-2">
-      <div id="postbox-container-1" style="float:left">
-        <div  class="postbox">
-          <h2 class="hndle"><span>Support the development</span></h2>
-          <div class="inside" style="text-align: center">
-                  <strong><?php esc_html_e( 'Donate by Paypal', 'hide-admin-menu' ); ?></strong>
-
-                  <br/>
-                  <a href="https://www.paypal.me/BThummar/10" target="_blank">
-                    <input type="image" src="https://www.paypal.com/en_US/i/btn/btn_donate_LG.gif" border="0" name="submit" alt="<?php esc_html_e( 'Send your donation to the author of', 'hide-admin-menu' ); ?> Hide Admin Menu" style="margin-top:4px;">
-                  </a>                  
-
-          </div>
-        </div>
-      </div>  
-    </div>
-  </div>
-</div>
-
-<!-- dontate form -->
-
-<?php }
-
-//remove menu from the admin at side bar
-function bhm_custom_side_menu_page_removing() {
-  
-  global $wp_session;
-  global $menu;
-  global $submenu;
-
-  $login_user = wp_get_current_user();
-  $login_user_roles = (array) $login_user->roles;
-
-  $wp_session['all_side_menus']  = $menu;
-  $wp_session['all_side_sub_menus']  = $submenu;
-  
-  $all_menu = $wp_session['all_side_menus'];
-  //now we have to fetch all hide_menu_array from the db
-  $get_data = get_option('hide_menu_bh_plugin'); 
-  if($get_data!='null' && $get_data!='' ){
-   $fetch_hide_menu_array = json_decode($get_data);
-  }
-  else{
-    $fetch_hide_menu_array = array();
-  }
-
-  //now fetch sub menu data
-  $get_data = get_option('hide_sub_menu_bh_plugin'); 
-  if($get_data!='null' && $get_data!='' ){
-   $fetch_hide_sub_menu_array = json_decode($get_data);
-  }
-  else{
-    $fetch_hide_sub_menu_array = array();
-  }
-
-  foreach ($fetch_hide_menu_array as $role_key => $hide_menu_array_role) {
-    if(in_array($role_key, $login_user_roles)){
-      foreach ($hide_menu_array_role as $hide_menu_array) {
-         remove_menu_page( $hide_menu_array );
-      }
-    }
-  }
-
-  foreach ($fetch_hide_sub_menu_array as $role_key => $hide_menu_array) {
-     //now we ge the parent key and child key
-    if(in_array($role_key, $login_user_roles)){
-      foreach ($hide_menu_array as $hide_menu_role_array) {
-        $pare_child = explode('__con__', $hide_menu_role_array);
-        //this is the patch for the wordpress 4 or may be latetest version for the customize menu only
-        if($pare_child[0] == 'themes.php'){
-          $parse_data = parse_url($pare_child[1]);
-          if($parse_data['path'] == 'customize.php'){
-              unset($submenu['themes.php'][6]); // Customize
-          }
-          //echo '<pre>';
-        }
-        remove_submenu_page($pare_child[0], $pare_child[1] );
-      }
-    }
-  }
-
-}
-add_action( 'admin_menu', 'bhm_custom_side_menu_page_removing' ,'9999');
-
-  //remove menu from the admin at top bar
-function bhm_custom_top_menu_page_removing() {
-
-  global $wp_session;
-  global $wp_admin_bar;
-
-  $login_user = wp_get_current_user();
-  $login_user_roles = (array) $login_user->roles;
-
-  $wp_session['all_top_menus']  = $wp_admin_bar->get_nodes();
-  
-  $all_menu = $wp_session['all_top_menus'];
-
-  //now we have to fetch all hide_menu_array from the db
-  $get_data = get_option('hide_top_menu_bh_plugin');
-  if($get_data!='null' && $get_data!='' ){
-   $fetch_hide_menu_array = json_decode($get_data);
-  }
-  else{
-    $fetch_hide_menu_array = array();
-  }
-
-  foreach ($fetch_hide_menu_array as $role_key => $hide_menu_array_role) {
-    if(in_array($role_key, $login_user_roles)){
-      foreach ($hide_menu_array_role as $hide_menu_array) {
-         $wp_admin_bar->remove_node( $hide_menu_array );
-      }
-    }
-  }
-
-}
-add_action( 'admin_bar_menu', 'bhm_custom_top_menu_page_removing' ,'9999');
-
-function admin_footer_text ($footer_text) {
-
-  global $wp_session;
-  
-  $screen = get_current_screen();
-  $is_hide_admin_menu = strpos( $screen->id, 'hide-admin-menu' );
-  // Check to make sure we're on a hide admin menu admin page.
-  if ( FALSE !== $is_hide_admin_menu ) {
-      // Change the footer text
-      $footer_text = sprintf( __( 'If you like %1$s please leave us a %2$s rating. A huge thanks in advance!', 'hide-admin-menu' ), sprintf( '<strong>%s</strong>', esc_html__( 'Hide Admin Menu', 'hide-admin-menu' ) ), '<a href="https://wordpress.org/support/plugin/hide-admin-menu/reviews?rate=5#new-post" target="_blank" class="is-rating-link" data-rated="' . esc_attr__( 'Thanks :)', 'hide-admin-menu' ) . '">&#9733;&#9733;&#9733;&#9733;&#9733;</a>' );
-  }
-  return $footer_text;
-
+/**
+ * Sidebar parent items that are real menus (skip separators and empty rows).
+ */
+function bhm_side_items( $menu ) {
+	$items = array();
+	if ( ! is_array( $menu ) ) {
+		return $items;
+	}
+	foreach ( $menu as $row ) {
+		if ( empty( $row[0] ) || empty( $row[2] ) ) {
+			continue;
+		}
+		if ( isset( $row[4] ) && false !== strpos( (string) $row[4], 'wp-menu-separator' ) ) {
+			continue;
+		}
+		$items[] = $row;
+	}
+	return $items;
 }
 
-add_filter('admin_footer_text', 'admin_footer_text', 1 );
+/**
+ * Group top bar nodes into parents and children.
+ */
+function bhm_build_top_tree( $nodes ) {
+	$tree = array();
+	if ( ! is_array( $nodes ) ) {
+		return $tree;
+	}
+	foreach ( $nodes as $id => $node ) {
+		if ( 'menu-toggle' === $id ) {
+			continue;
+		}
+		$parent = (string) $node->parent;
+		if ( '' === $parent || 'top-secondary' === $parent ) {
+			$tree[ $id ] = array( 'node' => $node, 'children' => array() );
+		}
+	}
+	foreach ( $nodes as $id => $node ) {
+		$parent = (string) $node->parent;
+		if ( '' === $parent || 'top-secondary' === $parent || 'menu-toggle' === $id ) {
+			continue;
+		}
+		if ( 'wp-logo-external' === $parent ) {
+			$parent = 'wp-logo';
+		} elseif ( 'user-actions' === $parent ) {
+			$parent = 'my-account';
+		}
+		if ( isset( $tree[ $parent ] ) ) {
+			$tree[ $parent ]['children'][] = $node;
+		}
+	}
+	return $tree;
+}
+
+/* ---------- Settings page ---------- */
+
+function bhm_get_menu_list() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( 'You do not have permission to access this page.', 'hide-admin-menu' ) );
+	}
+
+	global $bhm_session;
+
+	$roles       = wp_roles()->roles;
+	$hidden_side = bhm_read_option( 'hide_menu_bh_plugin' );
+	$hidden_sub  = bhm_read_option( 'hide_sub_menu_bh_plugin' );
+	$hidden_top  = bhm_read_option( 'hide_top_menu_bh_plugin' );
+
+	$side_menu = isset( $bhm_session['side'] ) ? $bhm_session['side'] : array();
+	$side_sub  = isset( $bhm_session['side_sub'] ) ? $bhm_session['side_sub'] : array();
+	$top_tree  = bhm_build_top_tree( isset( $bhm_session['top'] ) ? $bhm_session['top'] : array() );
+
+	$message = isset( $_GET['message'] ) ? sanitize_key( wp_unslash( $_GET['message'] ) ) : '';
+	$notice  = '';
+	if ( 'save' === $message ) {
+		$notice = __( 'Your changes have been saved.', 'hide-admin-menu' );
+	} elseif ( 'default' === $message ) {
+		$notice = __( 'Default settings restored. All menu items are visible again.', 'hide-admin-menu' );
+	}
+
+	$col_count = 1 + count( $roles );
+	$side_rows = bhm_side_items( $side_menu );
+	?>
+	<div class="wrap bhm-wrap">
+
+		<header class="bhm-header">
+			<h1 class="bhm-title"><?php esc_html_e( 'Hide Admin Menu', 'hide-admin-menu' ); ?></h1>
+			<p class="bhm-subtitle"><?php esc_html_e( 'Choose which sidebar and top bar items each user role should not see.', 'hide-admin-menu' ); ?></p>
+		</header>
+
+		<?php if ( '' !== $notice ) : ?>
+			<div class="notice notice-success is-dismissible"><p><?php echo esc_html( $notice ); ?></p></div>
+		<?php endif; ?>
+
+		<form method="post" action="" class="bhm-form">
+			<?php wp_nonce_field( 'bhm_save_menus' ); ?>
+
+			<div class="bhm-layout">
+				<div class="bhm-main">
+
+					<section class="bhm-card">
+						<div class="bhm-card-head">
+							<h2><?php esc_html_e( 'Sidebar menu', 'hide-admin-menu' ); ?></h2>
+							<span class="bhm-count"><?php echo esc_html( count( $side_rows ) ); ?> <?php esc_html_e( 'items', 'hide-admin-menu' ); ?></span>
+						</div>
+						<div class="bhm-table-wrap">
+							<table class="bhm-table">
+								<thead>
+									<tr>
+										<th scope="col" class="bhm-name-col"><?php esc_html_e( 'Menu item', 'hide-admin-menu' ); ?></th>
+										<?php foreach ( $roles as $role ) : ?>
+											<th scope="col" class="bhm-role-col"><?php echo esc_html( $role['name'] ); ?></th>
+										<?php endforeach; ?>
+									</tr>
+								</thead>
+								<tbody>
+								<?php if ( empty( $side_rows ) ) : ?>
+									<tr><td colspan="<?php echo esc_attr( $col_count ); ?>" class="bhm-empty"><?php esc_html_e( 'No sidebar menus found. Open this page again after the other plugins have loaded.', 'hide-admin-menu' ); ?></td></tr>
+								<?php endif; ?>
+
+								<?php foreach ( $side_rows as $row ) :
+									$slug     = $row[2];
+									$label    = wp_strip_all_tags( $row[0] );
+									$icon     = ( isset( $row[6] ) && is_string( $row[6] ) && 0 === strpos( $row[6], 'dashicons-' ) ) ? $row[6] : 'dashicons-admin-generic';
+									$children = isset( $side_sub[ $slug ] ) ? (array) $side_sub[ $slug ] : array();
+									?>
+									<tr class="bhm-parent">
+										<td class="bhm-name">
+											<span class="dashicons <?php echo esc_attr( $icon ); ?> bhm-icon" aria-hidden="true"></span>
+											<span class="bhm-label"><?php echo esc_html( $label ); ?></span>
+										</td>
+										<?php foreach ( $roles as $role_key => $role ) :
+											bhm_checkbox_cell( 'menu_list', $role_key, $slug, bhm_is_checked( $hidden_side, $role_key, $slug ), $label . ' - ' . $role['name'] );
+										endforeach; ?>
+									</tr>
+
+									<?php foreach ( $children as $child ) :
+										if ( empty( $child[0] ) || empty( $child[2] ) ) {
+											continue;
+										}
+										$child_value = $slug . '__con__' . $child[2];
+										$child_label = wp_strip_all_tags( $child[0] );
+										?>
+										<tr class="bhm-sub">
+											<td class="bhm-name"><span class="bhm-label"><?php echo esc_html( $child_label ); ?></span></td>
+											<?php foreach ( $roles as $role_key => $role ) :
+												bhm_checkbox_cell( 'sub_menu_list', $role_key, $child_value, bhm_is_checked( $hidden_sub, $role_key, $child_value ), $child_label . ' - ' . $role['name'] );
+											endforeach; ?>
+										</tr>
+									<?php endforeach; ?>
+								<?php endforeach; ?>
+								</tbody>
+							</table>
+						</div>
+					</section>
+
+					<section class="bhm-card">
+						<div class="bhm-card-head">
+							<h2><?php esc_html_e( 'Top bar menu', 'hide-admin-menu' ); ?></h2>
+						</div>
+						<div class="bhm-table-wrap">
+							<table class="bhm-table">
+								<thead>
+									<tr>
+										<th scope="col" class="bhm-name-col"><?php esc_html_e( 'Menu item', 'hide-admin-menu' ); ?></th>
+										<?php foreach ( $roles as $role ) : ?>
+											<th scope="col" class="bhm-role-col"><?php echo esc_html( $role['name'] ); ?></th>
+										<?php endforeach; ?>
+									</tr>
+								</thead>
+								<tbody>
+								<?php
+								$has_top = false;
+								foreach ( $top_tree as $id => $item ) :
+									$title = wp_strip_all_tags( (string) $item['node']->title );
+									if ( '' === trim( $title ) ) {
+										continue;
+									}
+									$has_top = true;
+									?>
+									<tr class="bhm-parent">
+										<td class="bhm-name"><span class="bhm-label"><?php echo esc_html( $title ); ?></span></td>
+										<?php foreach ( $roles as $role_key => $role ) :
+											bhm_checkbox_cell( 'top_menu_list', $role_key, $id, bhm_is_checked( $hidden_top, $role_key, $id ), $title . ' - ' . $role['name'] );
+										endforeach; ?>
+									</tr>
+									<?php foreach ( $item['children'] as $child ) :
+										$child_title = wp_strip_all_tags( (string) $child->title );
+										if ( '' === trim( $child_title ) ) {
+											continue;
+										}
+										?>
+										<tr class="bhm-sub">
+											<td class="bhm-name"><span class="bhm-label"><?php echo esc_html( $child_title ); ?></span></td>
+											<?php foreach ( $roles as $role_key => $role ) :
+												bhm_checkbox_cell( 'top_menu_list', $role_key, $child->id, bhm_is_checked( $hidden_top, $role_key, $child->id ), $child_title . ' - ' . $role['name'] );
+											endforeach; ?>
+										</tr>
+									<?php endforeach; ?>
+								<?php endforeach; ?>
+								<?php if ( ! $has_top ) : ?>
+									<tr><td colspan="<?php echo esc_attr( $col_count ); ?>" class="bhm-empty"><?php esc_html_e( 'No top bar menus found.', 'hide-admin-menu' ); ?></td></tr>
+								<?php endif; ?>
+								</tbody>
+							</table>
+						</div>
+					</section>
+
+				</div>
+
+				<aside class="bhm-aside">
+					<div class="bhm-card">
+						<h2><?php esc_html_e( 'How it works', 'hide-admin-menu' ); ?></h2>
+						<ul class="bhm-list">
+							<li><?php esc_html_e( 'Tick an item to hide it for that role.', 'hide-admin-menu' ); ?></li>
+							<li><?php esc_html_e( 'Untick it and save to show it again.', 'hide-admin-menu' ); ?></li>
+							<li><?php esc_html_e( 'This hides menu links only. Use role capabilities to block direct page access.', 'hide-admin-menu' ); ?></li>
+						</ul>
+					</div>
+					<div class="bhm-card bhm-support">
+						<h2><?php esc_html_e( 'Support the development', 'hide-admin-menu' ); ?></h2>
+						<p><?php esc_html_e( 'If this plugin helps you, consider a small donation. Thank you!', 'hide-admin-menu' ); ?></p>
+						<a class="button" href="https://www.paypal.me/BThummar/10" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Donate via PayPal', 'hide-admin-menu' ); ?></a>
+					</div>
+				</aside>
+			</div>
+
+			<div class="bhm-savebar">
+				<button type="submit" name="bhm_action" value="save" class="button button-primary button-large"><?php esc_html_e( 'Save changes', 'hide-admin-menu' ); ?></button>
+				<button type="submit" name="bhm_action" value="default" class="button button-large" onclick="return confirm('<?php echo esc_js( __( 'Reset all hidden menus for every role?', 'hide-admin-menu' ) ); ?>');"><?php esc_html_e( 'Reset to default', 'hide-admin-menu' ); ?></button>
+			</div>
+		</form>
+	</div>
+	<?php
+}
